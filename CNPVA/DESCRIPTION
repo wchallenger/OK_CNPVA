@@ -1,0 +1,12 @@
+Package: CNVPA
+Type: Package
+Title: ONA Chinook Virtual Population Analysis
+Version: 0.1.0
+Depends: tidyverse, ggplot2, scales, grid, gridExtra
+Date: 2019-01-17
+Author: Wendell Challenger
+Maintainer: Wendell Challenger <wchallenger@lgl.com>
+Description: Provides a series of tools for performing the Chinook (CN) Virtual Poulation Analysis (VPA) for the Okanagan Nation Alliance (ONA).
+License: GPL-2
+LazyLoad: yes
+RoxygenNote: 6.0.1
