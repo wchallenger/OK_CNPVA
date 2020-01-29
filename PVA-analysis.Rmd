@@ -1,0 +1,685 @@
+---
+title: "Okanagan Chinook Population Viability Analysis"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+##Background
+
+
+## Premable
+
+Before this analysis can be run you will need the following packages installed
+in your R distribution.
+```{r}
+package.list <- c('devtools', 'tidyverse', 'ggplot2', 'scales', 'gridExtra', 'openxlsx')
+```
+
+Next we will installs any packages that may be missing.
+```{r, echo=F}
+## Attempt to install missing packages. 
+new.packages <- package.list[!(package.list %in% installed.packages()[,"Package"])]
+if(length(new.packages) > 0) {
+  install.packages(new.packages)
+} else {
+  message("All required packages have already been installed.")
+}
+```
+
+With the packages installed we can load the custom CNPVA r-package that 
+is used to do the calculations along with any other required packages.
+```{r}
+rm(list=ls())  # clear workspace
+library(devtools)  # Sideload CNPVA custom R package
+library(openxlsx) # Useful for creating excel files
+load_all("CNPVA")
+library(grid)
+library(gridExtra)
+theme_set(theme_bw(14))
+```
+
+Finally, we will create an excel workbook to save our analysis output into.
+
+```{r}
+wb <- createWorkbook()
+wb.out <- createWorkbook()
+```
+
+
+
+
+## Settings
+
+First we create a list object to save the simulation scenario results.
+```{r}
+# nsim <- 1000     # Development
+nsim <- 10000    # Final run
+
+all.runs <- list()
+results <- list(
+  plots = list(spawners = list(), adults = list()), 
+  data = list(spawners=list(), adults=list())
+)
+```
+
+### Default Settings
+Currently the S.osar represent survival from MCN dam to age 2.
+```{r}
+setdef <- GetSettings("default v2")
+str(setdef)
+```
+
+Compute expected returns for the 15,000 releases
+```{r}
+n.rel <- 15000
+
+S.eo <- setdef$S.osar
+HR.o <- setdef$hr.ocean
+S.o  <- setdef$surv.ocean
+Spwn <- setdef$spawn.prob
+S.r  <- setdef$S.riv
+HR.r <- setdef$hr.river
+
+spawners <- rep(NA,4)
+names(spawners) <- paste0("age.", 2:5)
+
+spawners['age.2'] <- n.rel * S.eo * (1 - HR.o) *  Spwn[1] * S.r * (1 - HR.r)       # Age 2 SPawner
+spawners['age.3'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) *  Spwn[2] * S.r * (1 - HR.r)    # Age 3 Spawner
+spawners['age.4'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) * (1 - Spwn[2]) * S.o[3] * (1 - HR.o) * Spwn[3] * S.r * (1 - HR.r) # Age 4 Spawner 
+spawners['age.5'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) * (1 - Spwn[2]) * S.o[3] * (1 - HR.o) * (1 - Spwn[3]) * S.o[4] * (1 - HR.o) * 1 * S.r * (1 - HR.r) 
+
+spawners
+```
+
+```{r}
+round(sum(spawners))
+```
+
+
+
+### Upriver survival
+
+Load the upstream survival data included in the CNPVA package
+```{r}
+data(upstream)
+upstream
+```
+```{r, echo=FALSE}
+ggplot(upstream, aes(x=Year, y=Survival)) + 
+  geom_point() +
+  scale_y_continuous(trans=logit_trans(), breaks=c(seq(0.2, 0.8, by=0.2), 0.95, 0.99))  + 
+  geom_smooth(method="lm", formula = y~poly(x,1), se = TRUE) +
+  ylab("Upstream Survival")
+```
+
+Next we will create a linear model fit object containing the above regression
+relationship:
+```{r}
+summary(fit <- lm(qlogis(Survival)~Year, upstream))
+```
+
+This empirical regression relationship is used in the PVA to predict future
+survival rates with uncertainty (i.e., prediction intervals). To do so we must
+include the fit object in the settings passed to the simulator
+```{r}
+setdef$S.riv <- fit
+```
+
+
+
+
+## Scenario Runs
+
+The PVA considered a number of future scenarios over which to assess population
+viability these included:
+
+1. Mortality reductions through habitat improvements
+2. Hatchery supplementation
+3. Additional scenarios which combined aspects of (1) and (2)
+
+In this section we run the individual scenarios and add each run as a list 
+element in the `all.runs` object.
+
+However, first we must run the baseline or "status quo" scenario which captures
+our expectations of the future if no changes are implemented.
+
+```{r}
+all.runs[['Baseline']] <- PopSim(setdef, n.sim=nsim)
+```
+
+
+### Mortality Reductions (Habitat Improvements)
+
+It is too early in the recovery process to discuss what survival improvements
+associated with a particular habitat improvement strategy.  As such, we considered
+reductions in juvenile mortality, which we apply to the `S.juv` parameter.
+
+#### Scenarios
+
+A 10% reduction in juvenile mortality.
+```{r}
+settings <- setdef
+settings$S.juv <-  1 - ((1- settings$S.juv) * (1 - 0.10))
+all.runs[['10% mort reduction']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+A 30% reduction in juvenile mortality.
+```{r}
+settings <- setdef
+settings$S.juv <-  1 - ((1- settings$S.juv) * (1 - 0.30))
+all.runs[['30% mort reduction']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+A 50% reduction in juvenile mortality.
+```{r}
+settings <- setdef
+settings$S.juv <-  1 - ((1- settings$S.juv) * (1 - 0.5))
+all.runs[['50% mort reduction']] <- PopSim(settings, n.sim = nsim)
+```
+
+#### Results
+
+```{r, echo=FALSE}
+# Process results and save to excel
+runs <- c(
+  "Baseline", 
+  "10% mort reduction", 
+  "30% mort reduction", 
+  "50% mort reduction"
+)
+run.set <- all.runs[runs]
+
+
+# Compute summary tables
+results[['data']][['spawners']][['Habitat']] <- spawn.tab <- SummarizeSpawners(run.set, start.yr=2022)
+results[['data']][['adults']][['Habitat']] <- adults.tab <- SummarizeMetrics(run.set)    # Adult performance metrics
+
+# library(openxlsx)
+# wb <- createWorkbook()
+BlankWorkSheet(wb, sheet = "Habitat" )
+writeData(wb, "Habitat", select(spawn.tab$All, Type:SD))
+writeData(wb, "Habitat", select(adults.tab$All, Type:SD), startCol = 6)
+```
+
+#### Outcome Table
+
+```{r}
+(out1.tab <- OutcomeTable(run.set))
+BlankWorkSheet(wb.out, sheet = "Habitat")
+writeData(wb.out, "Habitat", out1.tab)
+```
+
+
+
+
+#### Overview
+
+```{r, fig.width=8, fig.height=6,  echo=FALSE}
+
+p.spawn <- ggplot(spawn.tab$All, aes(x=Scenario, y=Median)) + 
+  # geom_bar(stat="identity", fill="grey85", color="black") + 
+  geom_point() +
+  geom_errorbar(aes(ymin=Lower1, ymax=Upper99), width=0.25) +
+  facet_wrap(~Type,scales = "free_x") +
+  scale_y_continuous(labels = comma) +
+  # geom_hline(yintercept = 1000, linetype = "dashed")+
+  geom_hline(data = data.frame(Type =c("Average Spawners"), y = c( 1000)), mapping = aes( yintercept = y), linetype = "dashed") +
+  geom_hline(data = data.frame(Type =c("Minimum Spawners", "Average Spawners"), y = c(3500, 3500)), mapping = aes( yintercept = y), linetype = "solid", size=0) +
+  coord_flip() +
+  theme(
+    # axis.text.x = element_text(angle=-45, hjust=0, vjust=0.5)
+    axis.title.y = element_blank()
+  ) +
+  ylab("Number of Spawners")
+
+# print(p.spawn)
+
+results[['plots']][['spawners']][['Habitat']] <-  p.spawn 
+
+
+p.adult <- ggplot(adults.tab$All, aes(x=Scenario, y=Mean)) + 
+  # geom_bar(stat="identity", fill="grey85", color="black") + 
+  geom_point() +
+  geom_errorbar(aes(ymin=Lower95, ymax=Upper95), width=0.25) +
+  facet_wrap(~Type, scales = "free_x") +
+  # scale_y_continuous(labels = comma, breaks = c(seq(0,10000, by=2500))) +
+   scale_y_continuous(labels = comma) +
+  # geom_hline(data = data.frame(Type =c("Minimum Population Size", "Population in 2050"), y = c(2500, 5000)), mapping = aes( yintercept = y), linetype = "dashed") +
+  geom_hline(data = data.frame(Type =c("Minimum Population Size", "Population in 2050"), y = c(7500, 15000)), mapping = aes( yintercept = y), linetype = "solid", size=0) +
+  # geom_hline()
+  coord_flip() +
+  theme(
+    # axis.text.x = element_text(angle=-45, hjust=0, vjust=0.5)
+    axis.title.y = element_blank()
+  ) +
+  ylab("Number of Adults")
+
+results[['plots']][['adults']][['Habitat']] <- p.adult
+
+
+grid.arrange(
+  results[['plots']][['spawners']][['Habitat']] + ggtitle("A) Spawners"),
+  results[['plots']][['adults']][['Habitat']] + ggtitle("B) Adults"),
+  nrow=2, ncol=1,
+  as.table = F,
+  clip=F
+)
+
+```
+
+#### Detailed Spawners
+
+
+```{r, fig.width=10, fig.height = 5}
+PlotSpawners(run.set)
+```
+
+```{r}
+spawn.tab$Minimum
+```
+```{r}
+spawn.tab$Average
+```
+
+
+#### Detailed Adults
+
+```{r, fig.width=8, fig.height=8}
+PlotAdultMetrics(run.set, bins=100)
+```
+
+#### Alternative Metrics
+
+Empirial cumulative distribution plots of performance metrics.
+```{r, fig.width=12, fig.height=4}
+p.ecdf <- PlotMetricECDF(run.set, type="both", panel.widths = c(1,1.75))
+# ggsave(filename = "habitat-ecdf.png", width=10, height=4, plot=p.ecdf)
+```
+
+
+```{r}
+adults.tab$MPS
+```
+
+```{r}
+adults.tab$POP2050
+```
+
+
+### Hatchery Supplementation
+
+Hatchery supplementation looks at the effect of supplementing the wild population
+with hatchery releases each year.  Smolts are assumed to be full fitness, for
+reduced fitness can be consider for a given result by increasing the actual
+number of smolts release by what is believed to be the fitness deficit.
+#### Scenarios
+Hatchery Augmentation 50K (full fitness)
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 5 * 10^4
+all.runs[['Hatchery 50K']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+ Hatchery Augmentation 100K (full fitness)
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 1 * 10^5
+all.runs[['Hatchery 100K']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+ Hatchery Augmentation 150K (full fitness)
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 1.5 * 10^5
+all.runs[['Hatchery 150K']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+ Hatchery Augmentation 250K (full fitness)
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 2.5 * 10^5
+all.runs[['Hatchery 250K']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+ Hatchery Augmentation 500K (full fitness)
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 5 * 10^5
+all.runs[['Hatchery 500K']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+#### Results
+
+```{r, echo=FALSE}
+# Process results and save to excel
+runs <- c(
+  "Baseline", 
+  "Hatchery 50K",
+  "Hatchery 100K",
+  "Hatchery 150K",
+  "Hatchery 250K",
+  "Hatchery 500K"
+  )
+run.set <- all.runs[runs]
+
+# Compute summary tables
+results[['data']][['spawners']][['Element20']] <- spawn.tab <- SummarizeSpawners(run.set, start.yr=2022)
+results[['data']][['adults']][['Element20']] <- adults.tab <- SummarizeMetrics(run.set)    # Adult performance metrics
+
+BlankWorkSheet(wb,sheet = "Hatchery" )
+writeData(wb, "Hatchery", select(spawn.tab$Minimum, Type:SD))
+writeData(wb, "Hatchery", select(spawn.tab$Average, Type:SD), startCol = 6)
+```
+
+
+#### Outcome Table
+```{r}
+(out2.tab <- OutcomeTable(run.set))
+BlankWorkSheet(wb.out, sheet = "Hatchery")
+writeData(wb.out, "Hatchery", out2.tab)
+```
+
+
+#### Overview
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+results[['plots']][['spawners']][['Hatchery']] <-  p.spawn %+% spawn.tab$All
+results[['plots']][['adults']][['Hatchery']] <- p.adult %+% adults.tab$All
+grid.arrange(
+  results[['plots']][['spawners']][['Hatchery']] + ggtitle("A) Spawners"),
+  results[['plots']][['adults']][['Hatchery']] + ggtitle("B) Adults"),
+  nrow=2, ncol=1,
+  as.table = F,
+  clip=F
+)
+
+```
+
+
+
+
+
+#### Detailed Spawners
+
+```{r}
+PlotSpawners(run.set)
+# ggsave(filename = "hatchery-scenarios--spawners.png", width=10, height=8, plot=p)
+```
+```{r}
+spawn.tab$Minimum
+```
+```{r}
+spawn.tab$Average
+```
+
+
+
+
+#### Detailed Adults
+```{r, fig.width=10, fig.height=8, echo=FALSE}
+p.met <- PlotAdultMetrics(run.set, bins=100)
+```
+
+
+#### Alternative metrics
+
+```{r}
+adults.tab$MPS
+```
+
+```{r}
+adults.tab$POP2050
+```
+
+
+Empirial cumulative distribution plots of performance metrics.
+```{r, fig.width=12, fig.height=4}
+p.ecdf <- PlotMetricECDF(run.set, type="both", panel.widths = c(1,1.75))
+# ggsave(filename = "hatchery-ecdf.png", width=10, height=4, plot=p.ecdf)
+```
+
+
+
+### Additional Scenarios
+
+#### Scenarios
+
+No harvest (freshwater or marine)
+```{r}
+settings <- GetSettings('default v2')
+settings$hr.river <- 0
+settings$hr.ocean <- 0
+all.runs[['No Harvest']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+A natural doubling of productivity.
+```{r}
+settings <- GetSettings('default v2')
+settings$rec.alpha <- settings$rec.alpha *2
+all.runs[['Productivity 2x']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+
+150K hatchery program and a 30% reduction in juvenile mortality.
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 1.5 * 10^5    # 150K
+settings$S.juv <-  1 - ((1- settings$S.juv)* (1 - 0.30))
+all.runs[['Hatchery 150K + 30% Mort Reduction']] <- PopSim(settings, n.sim = nsim)
+```
+
+150K hatchery program and no harvest (freshwater or marine).
+```{r}
+settings <- GetSettings('default v2')
+settings$supplementation = 1.5 * 10^5    # 150K
+settings$hr.river <- 0
+settings$hr.ocean <- 0
+# settings$S.juv <-  1 - ((1- settings$S.juv)* (1 - 0.30) * (1 - 0.25)* (1 - 0.1))
+# settings$S.osar = settings$S.osar * 2
+all.runs[['Hatchery 150K + No Harvest']] <- PopSim(settings, n.sim = nsim)
+```
+
+No harvest (freshwater or marine) and a 30% reduction in juvenile mortality.
+```{r}
+settings <- GetSettings('default v2')
+settings$hr.river <- 0
+settings$hr.ocean <- 0
+settings$S.juv <-  1 - ((1- settings$S.juv)* (1 - 0.30))
+# settings$S.osar = settings$S.osar * 2
+all.runs[['No Harvest + 30% Mort Reduction']] <- PopSim(settings, n.sim = nsim)
+```
+
+
+
+
+
+#### Results
+
+```{r}
+runs <- c(
+  "No Harvest",
+  "Productivity 2x",
+  # "Hatchery 250K",  
+  "Hatchery 150K + 30% Mort Reduction",
+  "Hatchery 150K + No Harvest",
+  "No Harvest + 30% Mort Reduction"
+  )
+run.set <- all.runs[runs]
+
+# Compute summary tables
+results[['data']][['spawners']][['Other']] <- spawn.tab <- SummarizeSpawners(run.set, start.yr=2022)
+results[['data']][['adults']][['Other']] <- adults.tab <- SummarizeMetrics(run.set)    # Adult performance metrics
+```
+
+
+
+#### Outcome Table
+```{r, echo=FALSE}
+(out.tab <- OutcomeTable(run.set))
+BlankWorkSheet(wb.out, sheet = "Additional")
+writeData(wb.out, "Additional", out.tab)
+```
+
+
+#### Overview
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+results[['plots']][['spawners']][['Other']] <-  p.spawn %+% spawn.tab$All
+results[['plots']][['adults']][['Other']] <- p.adult %+% adults.tab$All
+grid.arrange(
+  results[['plots']][['spawners']][['Other']] + ggtitle("A) Spawners"),
+  results[['plots']][['adults']][['Other']] + ggtitle("B) Adults"),
+  nrow=2, ncol=1,
+  as.table = F,
+  clip=F
+)
+```
+
+
+#### Detailed Spawners
+
+```{r}
+PlotSpawners(run.set)
+```
+```{r}
+spawn.tab$Minimum
+```
+```{r}
+spawn.tab$Average
+```
+
+
+
+
+#### Detailed Adults
+```{r, fig.width=10, fig.height=8, echo=FALSE}
+p.met <- PlotAdultMetrics(run.set, bins=100)
+```
+
+
+#### Alternative metrics
+
+```{r}
+adults.tab$MPS
+```
+
+```{r}
+adults.tab$POP2050
+```
+
+
+Empirial cumulative distribution plots of performance metrics.
+```{r, fig.width=12, fig.height=4}
+p.ecdf <- PlotMetricECDF(run.set, type="both", panel.widths = c(1,1.75))
+# ggsave(filename = "hatchery-ecdf.png", width=10, height=4, plot=p.ecdf)
+```
+
+
+----
+
+## Post Processing and Figures
+```{r}
+save(all.runs, file = "sim-runs.RData")
+```
+
+
+```{r}
+saveWorkbook(wb, "results.xlsx", overwrite = TRUE)
+saveWorkbook(wb.out, "outcomes.xlsx", overwrite = TRUE)
+```
+
+
+```{r}
+str(all.runs, max.level = 1)
+```
+
+
+```{r, fig.width=9, fig.height=5.5, echo=FALSE}
+library(grid)
+library(gridExtra)
+grid.arrange(
+g <- arrangeGrob(
+  results$plots$spawners$Habitat + ggtitle("A) Habitat Restoration Work") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+       axis.text.x = element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 6.75), "lines")
+      ),
+  results$plots$spawners$Hatchery  + ggtitle("B) Hatchery Supplementation") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 8.25), "lines")
+    ), 
+  results$plots$spawners$Other  + ggtitle("C) Additional Scenarios") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.y = element_text(size=11)
+    ), 
+  nrow=3, ncol=1,
+  heights = c(1,1,1.05),
+  as.table = F,
+  bottom =  textGrob( "Number of Spawners", hjust = -0.35, gp=gpar(fontsize=12, fontface="plain")),
+  clip=F
+))
+ggsave(filename = "spawners--all-scenarios-wide.png", width=9, height=6,plot=g)
+ggsave(filename = "spawners--all-scenarios-tall.png", width=9, height=8,plot=g)
+```
+
+
+
+
+
+```{r, fig.width=9, fig.height=6, echo=FALSE}
+
+library(grid)
+library(gridExtra)
+grid.arrange(
+g <- arrangeGrob(
+  results$plots$adults$Habitat + ggtitle("A) Habitat Restoration Work") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 6.75), "lines")
+      ),
+  results$plots$adults$Hatchery  + ggtitle("B) Hatchery Supplementation") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 8.25), "lines")
+    ), 
+  results$plots$adults$Other  + ggtitle("C) Additional Scenarios") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.y = element_text(size=11)
+    ), 
+  nrow=3, ncol=1,
+  as.table = F,
+  heights = c(1,1,1.05),
+  bottom =  textGrob( "Number of Adults", hjust = -0.45, gp=gpar(fontsize=12, fontface="plain")),
+  clip=F
+))
+ggsave(filename = "adults--all-scenarios-tall.png", width=9, height=8, plot=g)
+ggsave(filename = "adults--all-scenarios-wide.png", width=9, height=6, plot=g)
+```
+
+
+
