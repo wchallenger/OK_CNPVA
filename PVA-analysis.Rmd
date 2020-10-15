@@ -5,7 +5,18 @@ editor_options:
   chunk_output_type: inline
 ---
 
-##Background
+## Context
+
+Okanagan Chinook were assessed in May 2005 by the Committee on the Status of Endangered Wildlife in Canada (COSEWIC) as Endangered in an Emergency Assessment.This status was re-examined in April 2006 to be Threatened due to the potential for rescue from nearby Upper Columbia River Chinook populations.  In 2010, the Federal Minister of Environment recommended that the Okanagan Chinook population not be listed under the Federal Species at Risk Act.  Reasons for not listing this population included substantial losses in revenue to the BC economy and even in the complete absence of fisheries exploitation the recovery potential was low.  COSEWIC reassessed the status as Endangered in 2017, stating that rescue via straying from nearby populations is considered unlikely.  In B.C., Okanagan Chinook Salmon are listed as "apparently secure" – not at risk of extinction – however the population has a relatively high conservation priority under the BC Ministry of Environment Conservation Framework Priority.
+
+Since 2002, the [Okanagan Nation Alliance (ONA)](https://www.syilx.org) has been actively involved in the study and conservation of Okanagan Chinook, including enumeration, biological sampling studies, and habitat enhancement.  ONA collaborated with Fisheries and Oceans, Columbia River Intertribal Fish Commission, and Summit Environmental to produce an Okanagan Chinook Recovery Potential Assessment (RPA) in 2006.  Furthermore, ONA produced a subsequent RPA in 2016.
+
+As part of the RPA process a population viability analysis (PVA) was conducted. 
+This script contains the revised PVA code used for the most recent RPA, which 
+is scheduled to be published in 2020.
+
+
+----
 
 
 ## Premable
@@ -30,12 +41,12 @@ if(length(new.packages) > 0) {
 With the packages installed we can load the custom CNPVA r-package that 
 is used to do the calculations along with any other required packages.
 ```{r}
-rm(list=ls())  # clear workspace
-library(devtools)  # Sideload CNPVA custom R package
-library(openxlsx) # Useful for creating excel files
-load_all("CNPVA")
-library(grid)
-library(gridExtra)
+rm(list=ls())      # clear workspace
+library(devtools)  # development tools
+library(openxlsx)  # Useful for creating excel files
+load_all("CNPVA")  # Sideload CNPVA custom R package using devtools
+library(grid)      # Multipanel plotting support
+library(gridExtra) # Multipanel plotting support
 theme_set(theme_bw(14))
 ```
 
@@ -53,7 +64,10 @@ wb.out <- createWorkbook()
 
 First we create a list object to save the simulation scenario results.
 ```{r}
-# nsim <- 1000     # Development
+set.seed(3980) # Ensure the results are exactly repeatable.
+
+# Number of simulation iterations
+# nsim <- 1000     # Quick run
 nsim <- 10000    # Final run
 
 all.runs <- list()
@@ -64,7 +78,7 @@ results <- list(
 ```
 
 ### Default Settings
-Currently the S.osar represent survival from MCN dam to age 2.
+Currently the `S.osar` represent survival from MCN dam to age 2.
 ```{r}
 setdef <- GetSettings("default v2")
 str(setdef)
@@ -83,15 +97,19 @@ HR.r <- setdef$hr.river
 
 spawners <- rep(NA,4)
 names(spawners) <- paste0("age.", 2:5)
-
-spawners['age.2'] <- n.rel * S.eo * (1 - HR.o) *  Spwn[1] * S.r * (1 - HR.r)       # Age 2 SPawner
-spawners['age.3'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) *  Spwn[2] * S.r * (1 - HR.r)    # Age 3 Spawner
-spawners['age.4'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) * (1 - Spwn[2]) * S.o[3] * (1 - HR.o) * Spwn[3] * S.r * (1 - HR.r) # Age 4 Spawner 
+# Age 2 Spawners
+spawners['age.2'] <- n.rel * S.eo * (1 - HR.o) *  Spwn[1] * S.r * (1 - HR.r)       
+# Age 3 Spawners
+spawners['age.3'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) *  Spwn[2] * S.r * (1 - HR.r)    
+# Age 4 Spawners 
+spawners['age.4'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) * (1 - Spwn[2]) * S.o[3] * (1 - HR.o) * Spwn[3] * S.r * (1 - HR.r) 
+# Age 5 Spawners
 spawners['age.5'] <- n.rel * S.eo * (1 - HR.o) * (1 - Spwn[1]) * S.o[2] * (1 - HR.o) * (1 - Spwn[2]) * S.o[3] * (1 - HR.o) * (1 - Spwn[3]) * S.o[4] * (1 - HR.o) * 1 * S.r * (1 - HR.r) 
 
 spawners
 ```
 
+Total number expected to have returned
 ```{r}
 round(sum(spawners))
 ```
@@ -110,7 +128,10 @@ ggplot(upstream, aes(x=Year, y=Survival)) +
   geom_point() +
   scale_y_continuous(trans=logit_trans(), breaks=c(seq(0.2, 0.8, by=0.2), 0.95, 0.99))  + 
   geom_smooth(method="lm", formula = y~poly(x,1), se = TRUE) +
-  ylab("Upstream Survival")
+  labs(
+    title = "Upstream Survival Trend",
+    y = "Upstream Survival"
+    )
 ```
 
 Next we will create a linear model fit object containing the above regression
@@ -195,17 +216,17 @@ run.set <- all.runs[runs]
 
 # Compute summary tables
 results[['data']][['spawners']][['Habitat']] <- spawn.tab <- SummarizeSpawners(run.set, start.yr=2022)
-results[['data']][['adults']][['Habitat']] <- adults.tab <- SummarizeMetrics(run.set)    # Adult performance metrics
 
-# library(openxlsx)
-# wb <- createWorkbook()
+# Adult performance metrics
+results[['data']][['adults']][['Habitat']] <- adults.tab <- SummarizeMetrics(run.set)    
+
 BlankWorkSheet(wb, sheet = "Habitat" )
 writeData(wb, "Habitat", select(spawn.tab$All, Type:SD))
 writeData(wb, "Habitat", select(adults.tab$All, Type:SD), startCol = 6)
 ```
 
 #### Outcome Table
-
+Determine the outcome probabilities and assign the IPCC outcome categories.
 ```{r}
 (out1.tab <- OutcomeTable(run.set))
 BlankWorkSheet(wb.out, sheet = "Habitat")
@@ -216,7 +237,8 @@ writeData(wb.out, "Habitat", out1.tab)
 
 
 #### Overview
-
+Diagnostics used as part of the original project assessments. Only the average
+spawner panel was used in the final RPA.
 ```{r, fig.width=8, fig.height=6,  echo=FALSE}
 
 p.spawn <- ggplot(spawn.tab$All, aes(x=Scenario, y=Median)) + 
@@ -225,9 +247,7 @@ p.spawn <- ggplot(spawn.tab$All, aes(x=Scenario, y=Median)) +
   geom_errorbar(aes(ymin=Lower1, ymax=Upper99), width=0.25) +
   facet_wrap(~Type,scales = "free_x") +
   scale_y_continuous(labels = comma) +
-  # geom_hline(yintercept = 1000, linetype = "dashed")+
   geom_hline(data = data.frame(Type =c("Average Spawners"), y = c( 1000)), mapping = aes( yintercept = y), linetype = "dashed") +
-  geom_hline(data = data.frame(Type =c("Minimum Spawners", "Average Spawners"), y = c(3500, 3500)), mapping = aes( yintercept = y), linetype = "solid", size=0) +
   coord_flip() +
   theme(
     # axis.text.x = element_text(angle=-45, hjust=0, vjust=0.5)
@@ -235,21 +255,17 @@ p.spawn <- ggplot(spawn.tab$All, aes(x=Scenario, y=Median)) +
   ) +
   ylab("Number of Spawners")
 
-# print(p.spawn)
+# RPA figure only retains the Average Spawners panel
 
 results[['plots']][['spawners']][['Habitat']] <-  p.spawn 
-
+results[['plots']][['spawners']][['Habitat.RPA']] <-  p.spawn %+% filter( spawn.tab$All, Type == "Average Spawners")
 
 p.adult <- ggplot(adults.tab$All, aes(x=Scenario, y=Mean)) + 
   # geom_bar(stat="identity", fill="grey85", color="black") + 
   geom_point() +
   geom_errorbar(aes(ymin=Lower95, ymax=Upper95), width=0.25) +
   facet_wrap(~Type, scales = "free_x") +
-  # scale_y_continuous(labels = comma, breaks = c(seq(0,10000, by=2500))) +
    scale_y_continuous(labels = comma) +
-  # geom_hline(data = data.frame(Type =c("Minimum Population Size", "Population in 2050"), y = c(2500, 5000)), mapping = aes( yintercept = y), linetype = "dashed") +
-  geom_hline(data = data.frame(Type =c("Minimum Population Size", "Population in 2050"), y = c(7500, 15000)), mapping = aes( yintercept = y), linetype = "solid", size=0) +
-  # geom_hline()
   coord_flip() +
   theme(
     # axis.text.x = element_text(angle=-45, hjust=0, vjust=0.5)
@@ -271,15 +287,19 @@ grid.arrange(
 ```
 
 #### Detailed Spawners
-
+Diagnostic used to look at the distribution of spawners being produced across 
+simulation iterations. 
 
 ```{r, fig.width=10, fig.height = 5}
 PlotSpawners(run.set)
 ```
 
+Summary statistics for the minimum number of spawners:
 ```{r}
 spawn.tab$Minimum
 ```
+
+Summary statistics for the average number of spawners:
 ```{r}
 spawn.tab$Average
 ```
@@ -287,23 +307,28 @@ spawn.tab$Average
 
 #### Detailed Adults
 
+Distribution of the minimum adults population size across all years in the simulation
+and the distribution of the adult population size in 2050 (metric used in the previous Okanagan Chinook RPA).
+
 ```{r, fig.width=8, fig.height=8}
 PlotAdultMetrics(run.set, bins=100)
 ```
 
 #### Alternative Metrics
 
-Empirial cumulative distribution plots of performance metrics.
+Empirical cumulative distribution plots of the minimum population size and population size in 2050 performance metrics used in the previous Okanagan Chinook RPA.
+
 ```{r, fig.width=12, fig.height=4}
 p.ecdf <- PlotMetricECDF(run.set, type="both", panel.widths = c(1,1.75))
 # ggsave(filename = "habitat-ecdf.png", width=10, height=4, plot=p.ecdf)
 ```
 
-
+Statistics for minimum population size metric:
 ```{r}
 adults.tab$MPS
 ```
 
+Statistics for population size in 2050 metric:
 ```{r}
 adults.tab$POP2050
 ```
@@ -315,6 +340,7 @@ Hatchery supplementation looks at the effect of supplementing the wild populatio
 with hatchery releases each year.  Smolts are assumed to be full fitness, for
 reduced fitness can be consider for a given result by increasing the actual
 number of smolts release by what is believed to be the fitness deficit.
+
 #### Scenarios
 Hatchery Augmentation 50K (full fitness)
 ```{r}
@@ -391,6 +417,8 @@ writeData(wb.out, "Hatchery", out2.tab)
 #### Overview
 ```{r, fig.width=8, fig.height=6, echo=FALSE}
 results[['plots']][['spawners']][['Hatchery']] <-  p.spawn %+% spawn.tab$All
+results[['plots']][['spawners']][['Hatchery.RPA']] <-  p.spawn %+% filter( spawn.tab$All, Type == "Average Spawners") # Final RPA panel
+
 results[['plots']][['adults']][['Hatchery']] <- p.adult %+% adults.tab$All
 grid.arrange(
   results[['plots']][['spawners']][['Hatchery']] + ggtitle("A) Spawners"),
@@ -508,7 +536,7 @@ all.runs[['No Harvest + 30% Mort Reduction']] <- PopSim(settings, n.sim = nsim)
 runs <- c(
   "No Harvest",
   "Productivity 2x",
-  # "Hatchery 250K",  
+  # "Hatchery 250K",   # duplication removed
   "Hatchery 150K + 30% Mort Reduction",
   "Hatchery 150K + No Harvest",
   "No Harvest + 30% Mort Reduction"
@@ -533,6 +561,7 @@ writeData(wb.out, "Additional", out.tab)
 #### Overview
 ```{r, fig.width=8, fig.height=6, echo=FALSE}
 results[['plots']][['spawners']][['Other']] <-  p.spawn %+% spawn.tab$All
+results[['plots']][['spawners']][['Other.RPA']] <-  p.spawn %+% filter( spawn.tab$All, Type == "Average Spawners")
 results[['plots']][['adults']][['Other']] <- p.adult %+% adults.tab$All
 grid.arrange(
   results[['plots']][['spawners']][['Other']] + ggtitle("A) Spawners"),
@@ -596,15 +625,60 @@ saveWorkbook(wb, "results.xlsx", overwrite = TRUE)
 saveWorkbook(wb.out, "outcomes.xlsx", overwrite = TRUE)
 ```
 
-
+Summary of plotting objects available
 ```{r}
 str(all.runs, max.level = 1)
 ```
 
+### Final RPA figure
+Main RPA results figure only focused on average spawners as reliable endpoints
+were not available for the other potential metrics.
+```{r, fig.width=8, fig.height=8, echo=FALSE}
+grid.arrange(
+g <- arrangeGrob(
+  results$plots$spawners$Habitat.RPA + ggtitle("A) Habitat Restoration Work") + 
+    expand_limits(y=4317) +
+    
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+       axis.text.x = element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 6.7), "lines")
+      ),
+  results$plots$spawners$Hatchery.RPA  + ggtitle("B) Hatchery Supplementation") + 
+     expand_limits(y=4317) +
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.x = element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.margin = unit(c(0.5, 0.5, 0.5, 8.3), "lines")
+    ), 
+  results$plots$spawners$Other.RPA  + ggtitle("C) Additional Scenarios") + 
+    theme(
+      title = element_text(size = 11),
+      axis.title = element_blank(),
+      axis.text.y = element_text(size=11)
+    ), 
+  nrow=3, ncol=1,
+  heights = c(1,1,1.05),
+  as.table = F,
+  bottom =  textGrob( "Number of Spawners", hjust = -0.35, gp=gpar(fontsize=12, fontface="plain")),
+  clip=F
+))
+ggsave(filename = "spawners--all-scenarios-RPA.png", width=8, height=8,plot=g)
+```
+
+
+
+### Additinal Figures
+
+These figures were reviewed in the workup prior to settling on the final RPA
+figure presented in the previous section.
+
 
 ```{r, fig.width=9, fig.height=5.5, echo=FALSE}
-library(grid)
-library(gridExtra)
 grid.arrange(
 g <- arrangeGrob(
   results$plots$spawners$Habitat + ggtitle("A) Habitat Restoration Work") + 
@@ -644,9 +718,6 @@ ggsave(filename = "spawners--all-scenarios-tall.png", width=9, height=8,plot=g)
 
 
 ```{r, fig.width=9, fig.height=6, echo=FALSE}
-
-library(grid)
-library(gridExtra)
 grid.arrange(
 g <- arrangeGrob(
   results$plots$adults$Habitat + ggtitle("A) Habitat Restoration Work") + 

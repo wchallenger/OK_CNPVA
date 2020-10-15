@@ -5,8 +5,9 @@ Okanagan Chinook were assessed in May 2005 by the Committee on the Status of End
 
 Since 2002, the [Okanagan Nation Alliance (ONA)](https://www.syilx.org) has been actively involved in the study and conservation of Okanagan Chinook, including enumeration, biological sampling studies, and habitat enhancement.  ONA collaborated with Fisheries and Oceans, Columbia River Intertribal Fish Commission, and Summit Environmental to produce an Okanagan Chinook Recovery Potential Assessment (RPA) in 2006.  Furthermore, ONA produced a subsequent RPA in 2016.
 
-As part of the RPA process a population viabiltiy anaysis (PVA) was conducted.  This
-repository contains the revised PVA code used for the most recent RPA (2020).
+As part of the RPA process a population viability analysis (PVA) was conducted.  This
+repository contains the revised PVA code used for the most recent RPA, which
+is scheduled to be published in 2020.
 
 ## Usage
 
